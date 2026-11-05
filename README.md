@@ -1,7 +1,7 @@
 # nohorny-natives
 
 <p align="center">
-  <img src=".github/nohorny-natives.svg" alt="nohorny-natives logo" width="740">
+  <a href="https://nohorny.xpdustry.com"><img src=".github/nohorny-natives.svg" alt="nohorny-natives logo" width="740"></a>
 </p>
 
 The image classifier of [NoHorny](https://github.com/xpdustry/nohorny).
