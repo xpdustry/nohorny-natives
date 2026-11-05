@@ -164,6 +164,9 @@ val cmakeBuild = tasks.register<Exec>("cmakeBuild") {
     dependsOn(cmakeConfigure)
     inputs.files("CMakeLists.txt", "cmake", "src/main/cpp").withPathSensitivity(PathSensitivity.RELATIVE)
     outputs.dir(nativesDirectory)
+    // Gradle empties the outputs of a task without history, including the directory CMake creates when configuring
+    val hostOutput = hostNativesDirectory.get().asFile
+    doFirst { hostOutput.mkdirs() }
     // Without a job count, the Makefile generator spawns as many jobs as there are sources
     val jobs = Runtime.getRuntime().availableProcessors()
     commandLine("cmake", "--build", cmakeDirectory.get().asFile.absolutePath, "--config", "Release", "--parallel", jobs)

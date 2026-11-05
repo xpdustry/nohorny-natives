@@ -24,76 +24,49 @@ env:
 
 jobs:
 
-  natives:
-    name: "Natives (${{ matrix.platform }})"
+  plan:
+    name: "Plan"
     if: ${{ github.event_name != 'pull_request' || github.repository != github.event.pull_request.head.repo.full_name }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # The manylinux images keep the glibc requirement low (2.28)
-          - platform: linux-x86_64
-            runner: ubuntu-24.04
-            container: quay.io/pypa/manylinux_2_28_x86_64
-          - platform: linux-aarch64
-            runner: ubuntu-24.04-arm
-            container: quay.io/pypa/manylinux_2_28_aarch64
-          - platform: windows-x86_64
-            runner: windows-2025
-          - platform: macos-aarch64
-            runner: macos-15
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 25
-    container: ${{ matrix.container }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
     permissions:
       contents: read
-    defaults:
-      run:
-        shell: bash
+    outputs:
+      key: ${{ steps.key.outputs.key }}
+      cached: ${{ steps.restore.outputs.cache-hit == 'true' }}
     steps:
 
       - name: "Checkout Repository"
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      # The natives of every platform share one entry, any change to their sources rebuilds all of them anyway
+      - name: "Compute Natives Key"
+        id: key
+        env:
+          HASH: ${{ hashFiles('.github/workflows/natives.yaml', '*.gradle.kts', 'build-logic/**', 'CMakeLists.txt', 'cmake/**', 'src/main/cpp/**', 'src/main/java/com/xpdustry/nohorny/natives/NoHornyNativeLookup.java') }}
+        run: echo "key=natives-$HASH" >> "$GITHUB_OUTPUT"
+
+      - name: "Lookup Natives"
+        id: restore
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
-          fetch-depth: 0
+          path: prebuilt-natives
+          key: ${{ steps.key.outputs.key }}
+          lookup-only: true
 
-      # The checkout is owned by the runner user but the container steps run as root,
-      # so git refuses to read the repository until the directory is marked as safe
-      - name: "Trust Repository"
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
-
-      - name: "Cache Natives"
-        id: cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
-        with:
-          path: build/generated/natives/
-          key: natives-${{ matrix.platform }}-${{ matrix.container || matrix.runner }}-${{ hashFiles('*.gradle.kts', 'build-logic/**', 'CMakeLists.txt', 'cmake/**', 'src/main/cpp/**', 'src/main/java/com/xpdustry/nohorny/natives/NoHornyNativeLookup.java') }}
-
-      - name: "Setup Java 25"
-        if: ${{ steps.cache.outputs.cache-hit != 'true' }}
-        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6
-        with:
-          java-version: "25"
-          distribution: "temurin"
-
-      - name: "Setup Gradle"
-        if: ${{ steps.cache.outputs.cache-hit != 'true' }}
-        uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6
-
-      - name: "Build Natives"
-        if: ${{ steps.cache.outputs.cache-hit != 'true' }}
-        run: ./gradlew cmakeBuild
-
-      - name: "Upload Natives"
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
-        with:
-          name: natives-${{ matrix.platform }}
-          path: build/generated/natives/
-          if-no-files-found: error
+  # A reusable workflow, since a skipped matrix job shows its name with the matrix expressions unexpanded
+  natives:
+    name: "Natives"
+    needs: plan
+    if: ${{ needs.plan.outputs.cached != 'true' }}
+    uses: ./.github/workflows/natives.yaml
+    permissions:
+      contents: read
 
   jar:
     name: "Jar"
-    needs: natives
+    needs: [ plan, natives ]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && (needs.natives.result == 'success' || needs.natives.result == 'skipped') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -133,7 +106,16 @@ jobs:
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
+      - name: "Restore Natives"
+        if: ${{ needs.plan.outputs.cached == 'true' }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: prebuilt-natives
+          key: ${{ needs.plan.outputs.key }}
+          fail-on-cache-miss: true
+
       - name: "Download Natives"
+        if: ${{ needs.plan.outputs.cached != 'true' }}
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           pattern: natives-*
@@ -142,6 +124,14 @@ jobs:
 
       - name: "Build Jar"
         run: ./gradlew build verifyNatives -Pprebuilt_natives=prebuilt-natives
+
+      # Saved once the jar builds, so an incomplete set of natives is never cached
+      - name: "Cache Natives"
+        if: ${{ needs.plan.outputs.cached != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: prebuilt-natives
+          key: ${{ needs.plan.outputs.key }}
 
       - name: "Upload Jar"
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
