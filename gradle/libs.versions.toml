@@ -1,5 +1,5 @@
 [versions]
-nohorny-natives = "0.1.0"
+nohorny-natives = "0.2.0"
 errorprone = "2.50.0"
 nullaway = "0.14.3"
 jspecify = "1.0.1"
