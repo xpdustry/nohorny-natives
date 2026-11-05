@@ -83,7 +83,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          commit_message: "chore(release): Bump version to ${{ steps.bump.outputs.version }}"
+          # Bot pull requests wait for an approval to run CI, which expires once merged, and the bump has nothing to check
+          commit_message: "chore(release): Bump version to ${{ steps.bump.outputs.version }} [skip ci]"
           repo: ${{ github.repository }}
           branch: ${{ steps.branch.outputs.branch }}
           file_pattern: "gradle/libs.versions.toml README.md"
