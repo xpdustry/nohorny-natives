@@ -26,6 +26,7 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: write
+      pull-requests: write
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       TAG: "v${{ needs.build.outputs.version }}"
@@ -46,7 +47,7 @@ jobs:
       - name: "Download Jar"
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
-          name: nohorny-natives
+          name: nohorny-natives.jar
           path: artifacts
 
       - name: "Create Release"
@@ -66,6 +67,16 @@ jobs:
             echo "::notice::The version already moved past $TAG, nothing to bump"
           fi
 
+      # The default branch only takes pull requests, so the bump goes through one
+      - name: "Create Bump Branch"
+        if: ${{ steps.bump.outputs.version != '' }}
+        id: branch
+        env:
+          BRANCH: release/bump-${{ steps.bump.outputs.version }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/heads/$BRANCH" -f sha="$(git rev-parse HEAD)" --silent
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+
       - name: "Commit Version Bump"
         if: ${{ steps.bump.outputs.version != '' }}
         uses: planetscale/ghcommit-action@a6b150b81dca5dd027baa898604418eec9e11465 # v0.2.22
@@ -74,5 +85,19 @@ jobs:
         with:
           commit_message: "chore(release): Bump version to ${{ steps.bump.outputs.version }}"
           repo: ${{ github.repository }}
-          branch: ${{ github.event.repository.default_branch }}
+          branch: ${{ steps.branch.outputs.branch }}
           file_pattern: "gradle/libs.versions.toml README.md"
+
+      - name: "Merge Version Bump"
+        if: ${{ steps.bump.outputs.version != '' }}
+        env:
+          BRANCH: ${{ steps.branch.outputs.branch }}
+          VERSION: ${{ steps.bump.outputs.version }}
+          BASE: ${{ github.event.repository.default_branch }}
+        run: |
+          gh pr create \
+            --base "$BASE" \
+            --head "$BRANCH" \
+            --title "chore(release): Bump version to $VERSION" \
+            --body "Bumps the version after the release of $TAG."
+          gh pr merge "$BRANCH" --squash --delete-branch
